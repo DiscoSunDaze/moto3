@@ -1,16 +1,17 @@
-// Year in footer (safe if element missing)
+// Footer year
 (function(){ const y=document.getElementById('y'); if (y) y.textContent=new Date().getFullYear(); })();
 
 /* =========================================================
-   Moto3GP.com — Pixel Track (10-bike tight pack)
-   - Large-ish track band (slightly slimmer than Moto2)
-   - 10 riders mapped to Moto3 team palettes
-   - Train behavior with occasional passes; no dot trails
+   Moto3gp — Pixel Track (10-bike tight pack)
+   - Large-ish track band, anchored
+   - 10 riders (Moto3 team palettes)
+   - Less bunching, more overtakes
+   - Faint pixel-fume trails
    ========================================================= */
 (function () {
   const canvas = document.getElementById('px-racer');
   if (!canvas) return;
-  const ctx = canvas.getContext('2d', { alpha:true });
+  const ctx = canvas.getContext('2d', { alpha: true });
   ctx.imageSmoothingEnabled = false;
 
   const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -18,7 +19,7 @@
   let PX = 4, W = 0, H = 0;
 
   // Slightly slimmer than Moto2
-  let TRACK_H = 60;  // desired; will be fitted
+  let TRACK_H = 60; // desired
   let groundY = 0, trackMidY = 0;
 
   const GAP_TOP_PX = 240, GAP_BOTTOM_PX = 240;
@@ -38,12 +39,31 @@
   ];
 
   const N = 10;
-  const riders = new Array(N);
-  for (let i=0;i<N;i++) riders[i] = {};
+  const riders = new Array(N); for (let i=0;i<N;i++) riders[i] = {};
   const tmpIdx = new Array(N).fill(0);
 
+  // Pixel fumes
+  const puffs = [];
+  const MAX_PUFFS = 600, PUFF_RATE = 18, PUFF_VX = 22, PUFF_FADE = 1.1;
+
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-  function fillTeams(list, k){ const out=[]; for (let i=0;i<k;i++) out.push(list[i%list.length]); return out; }
+  function fillTeams(list,k){ const out=[]; for(let i=0;i<k;i++) out.push(list[i%list.length]); return out; }
+
+  function emitPuff(x,y){
+    if (puffs.length >= MAX_PUFFS) puffs.shift();
+    puffs.push({ x, y, life: 1 });
+  }
+  function drawPuffs(dt){
+    for (let i=puffs.length-1;i>=0;i--){
+      const p = puffs[i];
+      p.life -= dt * PUFF_FADE;
+      p.x    -= dt * PUFF_VX;
+      if (p.life <= 0){ puffs.splice(i,1); continue; }
+      const a = Math.max(0, Math.min(1, p.life)) * 0.18;
+      ctx.fillStyle = `rgba(200,220,255,${a})`;
+      ctx.fillRect(p.x|0, p.y|0, 2, 2);
+    }
+  }
 
   function resize(){
     const vw = Math.max(1, innerWidth);
@@ -54,7 +74,7 @@
     canvas.width = W; canvas.height = H;
     canvas.style.width = vw + 'px'; canvas.style.height = vh + 'px';
 
-    const desiredTrackH = Math.max(60, Math.round(H * 0.36)); // large-ish, < Moto2
+    const desiredTrackH = Math.max(60, Math.round(H * 0.36)); // large-ish
 
     const panel  = document.querySelector('.panel');
     const footer = document.querySelector('.foot');
@@ -87,14 +107,13 @@
 
   function initRiders(){
     const chosen = fillTeams(MOTO3_TEAMS, N);
-    const span = TRACK_H * 0.12;
+    const span = TRACK_H * 0.14;
     for (let i=0;i<N;i++){
-      const pal = chosen[i];
-      const r = riders[i];
+      const pal = chosen[i], r = riders[i];
       r.palette = pal;
       r.x     = - (i * 28 + (Math.random()*16));
       r.speed = 28 + (i % 3) * 1.3 + Math.random()*1.6;
-      r.base  = ((i & 1) ? 1 : -1) * (span * 0.5) + (Math.random()*2 - 1);
+      r.base  = ((i & 1) ? 1 : -1) * (span * 0.55) + (Math.random()*2 - 1);
       r.phase = Math.random() * Math.PI * 2;
       r.amp   = 2 + Math.random() * 1.5;
       r.yMid  = trackMidY + r.base;
@@ -102,13 +121,13 @@
     }
   }
 
-  // Tighter train feel for Moto3
-  const HEADWAY_MIN = 11, HEADWAY_MAX = 16, SS_RANGE_Y = 3;
-  const DRAG_LOSS = 0.985, SS_GAIN = 1.10, CATCHUP = 1.13, BRAKE = 0.955;
-  const PASS_TIME = 1.3, PASS_RATE = 0.40, PASS_KICK = 1.14, PASS_SHIFT = 6, PASS_WINDOW = 0.8, ALIGN_GAIN = 0.12;
+  // Moto3: tight but freer flow
+  const HEADWAY_MIN = 14, HEADWAY_MAX = 22, SS_RANGE_Y = 3;
+  const DRAG_LOSS = 0.985, SS_GAIN = 1.08, CATCHUP = 1.12, BRAKE = 0.955;
+  const PASS_TIME = 0.85, PASS_RATE = 0.60, PASS_KICK = 1.16, PASS_SHIFT = 6, PASS_WINDOW = 0.95, ALIGN_GAIN = 0.09;
 
   function updatePack(dt, t){
-    for (let i=0;i<N;i++) tmpIdx[i] = i;
+    for (let i=0;i<N;i++) tmpIdx[i]=i;
     tmpIdx.sort((a,b)=>riders[a].x - riders[b].x);
 
     for (let oi=0;oi<N;oi++){
@@ -155,6 +174,10 @@
 
       r.x += (r.speed * vMul) * dt;
 
+      if (!prefersReduced && r.passT <= 0 && Math.random() < PUFF_RATE * dt){
+        emitPuff(r.x + 2, r.yMid + 10);
+      }
+
       const halfSafe = (TRACK_H / 2) - 7;
       r.yMid = clamp(trackMidY + r.base + Math.sin(t*1.0 + r.phase)*r.amp,
                      trackMidY - halfSafe, trackMidY + halfSafe);
@@ -188,13 +211,13 @@
     // Exhaust
     d(x +  5*S, y + 11*S, 4*S, 1*S, '#1a1a1a');
 
-    // Fairing/tank/tail (Moto3: slightly simpler aero)
+    // Fairing/tank/tail (Moto3: simpler aero)
     d(x +  5*S, y +  5*S, 7*S, 2*S, pal.base);
     d(x +  3*S, y +  7*S,11*S, 2*S, pal.base);
     d(x + 14*S, y +  6*S, 2*S, 2*S, pal.base);
     d(x + 14*S, y +  5*S, 2*S, 1*S, '#e6f2ff'); // screen
 
-    // Tiny winglet hint
+    // Tiny winglet
     d(x + 13*S, y +  7*S, 1*S, 1*S, '#1a1f2b');
 
     // Accent stripe
@@ -228,6 +251,7 @@
 
     ctx.clearRect(0,0,W,H);
     drawTrack();
+    drawPuffs(dt);
 
     if (!prefersReduced) updatePack(dt, t);
 
